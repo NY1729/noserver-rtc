@@ -21,7 +21,7 @@ const dotClass: Record<ConnState, string> = {
 };
 
 function CallPageInner() {
-  const incomingData = useSearchParams().get("data");
+  const incomingData = useSearchParams().get("d");
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const pendingCallIdRef = useRef<string | null>(null);
