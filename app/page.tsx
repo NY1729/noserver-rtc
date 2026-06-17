@@ -10,7 +10,7 @@ import {
   attachDebugLogging,
   attachLocalMedia,
 } from "@/lib/webrtc";
-
+import { compressToBase64Url, decompressFromBase64Url } from "@/lib/compress";
 type ConnState = "idle" | "connecting" | "connected" | "error";
 
 const dotClass: Record<ConnState, string> = {
@@ -170,7 +170,11 @@ function CallPageInner() {
           callId,
           subscription: callerSub,
           sdp: offer,
-        } = JSON.parse(decodeURIComponent(incomingData));
+        } = await decompressFromBase64Url<{
+          callId: string;
+          subscription: unknown;
+          sdp: RTCSessionDescriptionInit;
+        }>(incomingData);
         appendLog(`[callee] callId=${callId}`);
 
         const pc = createPeerConnection();
@@ -234,9 +238,12 @@ function CallPageInner() {
       const offer = await createFullOffer(pc);
       appendLog("[caller] offer作成完了");
 
-      setLink(
-        `${location.origin}/?data=${encodeURIComponent(JSON.stringify({ callId, subscription: mySub, sdp: offer }))}`,
-      );
+      const compact = await compressToBase64Url({
+        callId,
+        subscription: mySub,
+        sdp: offer,
+      });
+      setLink(`${location.origin}/?d=${compact}`);
       setStatusText("リンクを相手に共有してください");
     } catch (err) {
       appendLog(`[caller] エラー: ${(err as Error).message}`);
