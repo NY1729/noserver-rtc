@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
+import { decryptLink } from "@/lib/linkToken";
 
 webpush.setVapidDetails(
   process.env.VAPID_SUBJECT!,
@@ -8,29 +9,18 @@ webpush.setVapidDetails(
 );
 
 export async function POST(req: NextRequest) {
-  const origin = req.headers.get("origin");
-  const secret = req.headers.get("x-poc-secret");
+  const { token, payload } = await req.json();
 
-  if (
-    process.env.NEXT_PUBLIC_APP_ORIGIN &&
-    origin !== process.env.NEXT_PUBLIC_APP_ORIGIN
-  ) {
-    return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
-  }
-  if (process.env.POC_SECRET && secret !== process.env.POC_SECRET) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  const { subscription, payload } = await req.json();
-  if (!subscription?.endpoint) {
-    return NextResponse.json(
-      { error: "invalid subscription" },
-      { status: 400 },
-    );
+  const result = decryptLink<{ subscription: PushSubscriptionJSON }>(token);
+  if (!result.valid) {
+    return NextResponse.json({ error: result.reason }, { status: 403 });
   }
 
   try {
-    await webpush.sendNotification(subscription, JSON.stringify(payload));
+    await webpush.sendNotification(
+      result.data.subscription as any,
+      JSON.stringify(payload),
+    );
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     if (err?.statusCode === 404 || err?.statusCode === 410) {

@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { subscribeToPush, sendPush } from "@/lib/push";
+import { subscribeToPush, sendPush, createLink, verifyLink } from "@/lib/push";
 import {
   createPeerConnection,
   createFullOffer,
@@ -10,7 +10,7 @@ import {
   attachDebugLogging,
   attachLocalMedia,
 } from "@/lib/webrtc";
-import { compressToBase64Url, decompressFromBase64Url } from "@/lib/compress";
+
 type ConnState = "idle" | "connecting" | "connected" | "error";
 
 const dotClass: Record<ConnState, string> = {
@@ -160,21 +160,25 @@ function CallPageInner() {
     dcRef.current = dc;
   };
 
+  // callee側: リンクのトークンを検証してofferを処理し、answerを送る
   useEffect(() => {
     if (!incomingData) return;
     (async () => {
       try {
         setConnState("connecting");
-        setStatusText("応答を作成中");
-        const {
-          callId,
-          subscription: callerSub,
-          sdp: offer,
-        } = await decompressFromBase64Url<{
+        setStatusText("リンクを検証中");
+
+        const result = await verifyLink<{
           callId: string;
-          subscription: unknown;
           sdp: RTCSessionDescriptionInit;
         }>(incomingData);
+        if (!result.valid) {
+          setStatusText(`リンクが無効です(${result.reason})`);
+          setConnState("error");
+          return;
+        }
+
+        const { callId, sdp: offer } = result.data;
         appendLog(`[callee] callId=${callId}`);
 
         const pc = createPeerConnection();
@@ -185,7 +189,7 @@ function CallPageInner() {
         const answer = await createFullAnswer(pc, offer);
         appendLog("[callee] answer作成完了、送信します");
 
-        await sendPush(callerSub, { type: "answer", callId, sdp: answer });
+        await sendPush(incomingData, { type: "answer", callId, sdp: answer });
         appendLog("[callee] answer送信成功");
         setStatusText("応答を送信しました。接続待ち");
       } catch (err) {
@@ -196,6 +200,7 @@ function CallPageInner() {
     })();
   }, [incomingData]);
 
+  // caller側: pushで届いたanswerを受け取る
   useEffect(() => {
     if (incomingData) return;
     const handler = async (event: MessageEvent) => {
@@ -230,20 +235,20 @@ function CallPageInner() {
       pcRef.current = pc;
       setupDataChannel(pc.createDataChannel("chat"));
 
-      const callId = crypto.randomUUID();
+      const callId = Math.random().toString(36).slice(2, 10);
       pendingCallIdRef.current = callId;
       appendLog(`[caller] callId=${callId}`);
 
-      setStatusText("リンクを作成中");
+      setStatusText("offerを作成中(ICE収集待ち)");
       const offer = await createFullOffer(pc);
       appendLog("[caller] offer作成完了");
 
-      const compact = await compressToBase64Url({
-        callId,
-        subscription: mySub,
-        sdp: offer,
-      });
-      setLink(`${location.origin}/?d=${compact}`);
+      setStatusText("リンクを作成中");
+      const token = await createLink(
+        { callId, subscription: mySub, sdp: offer },
+        10 * 60 * 1000,
+      );
+      setLink(`${location.origin}/?d=${token}`);
       setStatusText("リンクを相手に共有してください");
     } catch (err) {
       appendLog(`[caller] エラー: ${(err as Error).message}`);

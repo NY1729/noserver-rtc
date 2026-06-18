@@ -1,3 +1,10 @@
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
 export async function subscribeToPush() {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     throw new Error("このブラウザはWeb Pushに対応していません");
@@ -5,7 +12,6 @@ export async function subscribeToPush() {
   const registration = await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
 
-  // 既存subscriptionがあれば再利用(毎回新規生成しない)
   const existing = await registration.pushManager.getSubscription();
   if (existing) return existing.toJSON();
 
@@ -22,14 +28,35 @@ export async function subscribeToPush() {
   return subscription.toJSON();
 }
 
-export async function sendPush(subscription: unknown, payload: unknown) {
+export async function sendPush(token: string, payload: unknown) {
   const res = await fetch("/api/notify", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-poc-secret": process.env.NEXT_PUBLIC_POC_SECRET!,
-    },
-    body: JSON.stringify({ subscription, payload }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, payload }),
   });
   if (!res.ok) throw new Error(`push送信に失敗しました (${res.status})`);
+}
+
+export async function createLink(
+  payload: object,
+  ttlMs: number,
+): Promise<string> {
+  const res = await fetch("/api/sign-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload, ttlMs }),
+  });
+  const { token } = await res.json();
+  return token;
+}
+
+export async function verifyLink<T>(
+  token: string,
+): Promise<{ valid: true; data: T } | { valid: false; reason: string }> {
+  const res = await fetch("/api/verify-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  return res.json();
 }
